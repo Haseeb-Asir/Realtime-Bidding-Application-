@@ -11,3 +11,15 @@ Base.metadata.create_all(bind=engine)
 
 # pydantic models for data validation
 from pydantic import BaseModel
+
+# how users will send or recieve output from the api
+class UserCreate(BaseModel):
+    username: str
+    email: str
+
+class ProductCreate(BaseModel):
+    name: str
+    description: str
+    starting_price: float
+    time_left: int
+
