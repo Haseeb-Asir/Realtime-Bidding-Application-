@@ -12,7 +12,11 @@ def create_user(user: schema.UserCreate, db: Session = Depends(schema.get_db)):
 
 @app.post("/products/")
 def create_product(product: schema.ProductCreate, db: Session = Depends(schema.get_db)):
-    return mainfunc.create_product(db, product)
+    
+    mainfunc.create_product(db, product)
+    mainfunc.get_or_create_room(db, product.product_id)
+    return {"message": "Product created and room initialized successfully"}
+
 
 @app.post("/rooms/")
 def create_room(product_id: int, db: Session = Depends(schema.get_db)):

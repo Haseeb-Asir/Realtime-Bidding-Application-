@@ -2,7 +2,8 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import WebSocket, WebSocketDisconnect
-from database.model import User, Product, Room
+from streamlit import json
+from database.model import User, Product, Room,Bids
 from database.schema import UserCreate, ProductCreate, RoomCreate
 from sqlalchemy.orm import Session
 
@@ -43,23 +44,8 @@ def get_or_create_room(db: Session, product_id: int):
         db.commit()
         db.refresh(db_room)
         
-    return db_room
+    return "Room created or already exists with room_id: {}".format(db_room.room_id)
 
-# core websoket function for app 
-def bid(db:Session , room_id: int, user_id: int, bid_amount: float):
-
-    room = db.query(Room).filter(Room.room_id == room_id).first()
-
-    if not room:
-        raise Exception("Room not found")
-    
-    if bid_amount <= room.highest_bid_price:
-        raise Exception("Bid must be higher than current highest bid")
-    
-    # Update the highest bid price in the room
-    room.highest_bid_price = bid_amount
-    db.commit()
-    
 
 
 class ConnectionManager:
@@ -87,3 +73,56 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def bid_handler(websocket: WebSocket, room_id: int, user_id: int, db: Session):
+    await manager.connect(websocket, room_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            new_bid_amount = float(message.get("amount"))
+
+            # Start a transaction for the lock
+            try:
+                # SELECT ... FOR UPDATE
+                # This locks the row. Other requests for this room_id will wait here.
+                room = db.query(Room).filter(Room.room_id == room_id).with_for_update().first()
+
+                if not room:
+                    await websocket.send_text(json.dumps({"error": "Room not found"}))
+                    continue
+
+                # Now that we have the lock, check the price safely
+                if new_bid_amount > room.highest_bid_price:
+                    # Update Room
+                    room.highest_bid_price = new_bid_amount
+                    
+                    # Create Bid Log
+                    new_bid_log = Bid(
+                        room_id=room_id,
+                        user_id=user_id,
+                        bid_amount=new_bid_amount,
+                        bid_time=datetime.utcnow()
+                    )
+                    
+                    db.add(new_bid_log)
+                    db.commit() # Lock is released ONLY after commit()
+
+                    # Broadcast to everyone
+                    await manager.broadcast({
+                        "event": "new_highest_bid",
+                        "amount": new_bid_amount,
+                        "user_id": user_id
+                    }, room_id)
+                else:
+                    db.rollback() # Release lock if bid is too low
+                    await websocket.send_text(json.dumps({
+                        "event": "bid_rejected",
+                        "msg": "Bid too low!"
+                    }))
+
+            except Exception as e:
+                db.rollback() # Always rollback on error to release the lock
+                print(f"Database error: {e}")
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, room_id)

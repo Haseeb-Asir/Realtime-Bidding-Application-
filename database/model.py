@@ -8,9 +8,8 @@ class User(Base):
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String, unique=True, nullable=False)
     email = Column(String,unique=True,nullable=True)
-    product_id = Column(Integer, ForeignKey('Products.product_id'), nullable=True)
-    bought_price= Column(Float, nullable=True)
     customer_type = Column(String, nullable=False)  # 'buyer' or 'seller'
+
 
 class Product(Base):
     __tablename__ = 'Products'
@@ -25,7 +24,15 @@ class Room(Base):
     __tablename__ = 'Rooms'
     room_id = Column(Integer, primary_key=True, autoincrement=True)
     product_id = Column(Integer, ForeignKey('Products.product_id'))
-    user_id = Column(Integer, ForeignKey('users.user_id'))
     highest_bid_price = Column(Float, nullable=False)
     end_time = Column(DateTime(timezone=True), nullable=False) 
+    current_highest_bidder_id = Column(Integer, ForeignKey('users.user_id'), nullable=True)
+
+class Bids(Base):
+    __tablename__ = 'Bids'
+    bid_id = Column(Integer, primary_key=True, autoincrement=True)
+    room_id = Column(Integer, ForeignKey('Rooms.room_id'))
+    user_id = Column(Integer, ForeignKey('users.user_id'))
+    bid_amount = Column(Float, nullable=False)
+    bid_time = Column(DateTime(timezone=True), nullable=False)
 
