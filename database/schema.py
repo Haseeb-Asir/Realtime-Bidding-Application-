@@ -27,6 +27,10 @@ class RoomCreate(BaseModel): # activate as soon as someone clicks on the product
     product_id : int
     highest_bid_price : float
 
+class BidsCreate(BaseModel):
+    room_id : int
+    user_id : int
+    bid_amount : float
 
 def get_db():
     db = SessionLocal()

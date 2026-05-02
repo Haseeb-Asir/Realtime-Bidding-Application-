@@ -1,8 +1,8 @@
 # all important functions for the app are defined here
 from datetime import datetime, timedelta, timezone
-
+import json
 from fastapi import WebSocket, WebSocketDisconnect
-from streamlit import json
+
 from database.model import User, Product, Room,Bids
 from database.schema import UserCreate, ProductCreate, RoomCreate
 from sqlalchemy.orm import Session
@@ -86,7 +86,12 @@ async def bid_handler(websocket: WebSocket, room_id: int, user_id: int, db: Sess
                 # SELECT ... FOR UPDATE
                 # This locks the row. Other requests for this room_id will wait here.
                 room = db.query(Room).filter(Room.room_id == room_id).with_for_update().first()
-
+                if datetime.now(timezone.utc) >= room.end_time:
+                    db.rollback() # Release the lock
+                    await websocket.send_text(json.dumps({
+                    "event": "auction_ended",
+                    "msg": "Bidding is closed for this item."}))
+                    break 
                 if not room:
                     await websocket.send_text(json.dumps({"error": "Room not found"}))
                     continue
@@ -97,11 +102,11 @@ async def bid_handler(websocket: WebSocket, room_id: int, user_id: int, db: Sess
                     room.highest_bid_price = new_bid_amount
                     
                     # Create Bid Log
-                    new_bid_log = Bid(
+                    new_bid_log = Bids(
                         room_id=room_id,
                         user_id=user_id,
                         bid_amount=new_bid_amount,
-                        bid_time=datetime.utcnow()
+                        bid_time=datetime.now(timezone.utc)
                     )
                     
                     db.add(new_bid_log)
