@@ -22,6 +22,26 @@ def create_product(product: schema.ProductCreate, db: Session = Depends(schema.g
     return {"message": "Product created and room initialized successfully"}
 
 # --- The WebSocket Route ---
+@app.get("/rooms/")
+def get_active_rooms(db: Session = Depends(schema.get_db)):
+    # 1. Fetch all rooms from the database
+    rooms = db.query(model.Room).all()
+    
+    catalogue = []
+    for room in rooms:
+        # 2. For each room, fetch the matching product to get its name
+        product = db.query(model.Product).filter(model.Product.product_id == room.product_id).first()
+        
+        if product:
+            catalogue.append({
+                "room_id": room.room_id,
+                "name": product.name,
+                "current_price": room.highest_bid_price,
+                # Convert datetime to a string so it can be sent as JSON
+                "end_time": room.end_time.isoformat() if room.end_time else None 
+            })
+            
+    return catalogue
 
 @app.websocket("/ws/auction/{room_id}/{user_id}")
 async def websocket_endpoint(
