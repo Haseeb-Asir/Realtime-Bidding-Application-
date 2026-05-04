@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Auction Engine</title>
+    <style>
+        /* --- CSS ARCHITECTURE --- */
+        :root {
+            --bg-color: #f4f7f6;
+            --card-bg: #ffffff;
+            --primary: #2c3e50;
+            --accent: #e74c3c;
+            --accent-hover: #c0392b;
+            --text-main: #333;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { background: var(--card-bg); padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
+        
+        h1, h2 { color: var(--primary); text-align: center; }
+        .screen { display: none; } 
+        .active { display: block; } 
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-family: inherit;}
+        button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background 0.3s; margin-top: 10px;}
+        button:hover { background: #34495e; }
+        button.action { background: var(--accent); }
+        button.action:hover { background: var(--accent-hover); }
+        button.secondary { background: #95a5a6; }
+        button.secondary:hover { background: #7f8c8d; }
+
+        /* Catalogue Grid */
+        .catalogue { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 20px; }
+        .product-card { border: 1px solid #eee; padding: 15px; border-radius: 8px; background: #fafafa; display: flex; justify-content: space-between; align-items: center;}
+        
+        /* Live Room Box */
+        .live-room { border: 2px solid var(--primary); padding: 20px; border-radius: 8px; text-align: center; background: #ecf0f1; }
+        .price-tag { font-size: 42px; font-weight: bold; color: var(--accent); margin: 10px 0; }
+        .timer { font-size: 24px; color: var(--primary); font-weight: bold; }
+        
+        #chat-log { height: 200px; overflow-y: auto; background: white; border: 1px solid #ccc; padding: 10px; text-align: left; margin-top: 15px; font-family: monospace; font-size: 13px; border-radius: 6px;}
+        .log-entry { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    
+    <!-- SCREEN 1: LOGIN -->
+    <div id="login-screen" class="screen active">
+        <h1>Auction Engine</h1>
+        <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="username" placeholder="e.g., Haseeb">
+        </div>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="email" placeholder="haseeb@example.com">
+        </div>
+        <div class="form-group">
+            <label>I am a...</label>
+            <select id="userType">
+                <option value="buyer">Buyer (Bid on items)</option>
+                <option value="seller">Seller (Create auctions)</option>
+            </select>
+        </div>
+        <button class="action" onclick="login()">Enter Application</button>
+    </div>
+
+    <!-- SCREEN 2: SELLER DASHBOARD -->
+    <div id="seller-screen" class="screen">
+        <h2>Seller Dashboard</h2>
+        <p>Create a new item for auction.</p>
+        <div class="form-group">
+            <label>Product Name</label>
+            <input type="text" id="prod-name" placeholder="e.g., RTX 4090 GPU">
+        </div>
+        <div class="form-group">
+            <label>Starting Price ($)</label>
+            <input type="number" id="prod-price" placeholder="500">
+        </div>
+        <div class="form-group">
+            <label>Time Limit (Minutes)</label>
+            <input type="number" id="prod-time" placeholder="5" value="5">
+        </div>
+        <button class="action" onclick="createProduct()">Launch Auction</button>
+        <button class="secondary" onclick="logout()">Logout</button>
+    </div>
+
+    <!-- SCREEN 3: BUYER CATALOGUE -->
+    <div id="buyer-screen" class="screen">
+        <h2>Live Catalogue</h2>
+        <p>Select a room to join the live auction.</p>
+        
+        <button onclick="loadCatalogue()">🔄 Refresh Auctions</button>
+        <div id="catalogue-list" class="catalogue"></div>
+        
+        <button class="secondary" onclick="logout()" style="margin-top: 20px;">Logout</button>
+    </div>
+
+    <!-- SCREEN 4: THE LIVE AUCTION ROOM -->
+    <div id="room-screen" class="screen">
+        <h2 id="room-title">Loading Room...</h2>
+        
+        <div class="live-room">
+            <div>Current Highest Bid:</div>
+            <div class="price-tag">$<span id="current-price">0</span></div>
+            <div>Status: <span class="timer" id="countdown">Calculating...</span></div>
+            
+            <div class="form-group" style="margin-top: 20px;">
+                <input type="number" id="bid-amount" placeholder="Enter your bid amount...">
+            </div>
+            <button class="action" onclick="placeBid()">Place Bid 🚀</button>
+        </div>
+
+        <div id="chat-log"></div>
+        <button class="secondary" onclick="leaveRoom()">Leave Room</button>
+    </div>
+
+</div>
+
+<script>
+    /* --- SYSTEM STATE --- */
+    const API_URL = 'http://localhost:8000';
+    let currentUser = { id: null, username: null, type: null };
+    let currentWs = null;
+
+    /* --- 1. NAVIGATION LOGIC --- */
+    function showScreen(screenId) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(screenId).classList.add('active');
+    }
+
+    function login() {
+        const username = document.getElementById('username').value;
+        const email = document.getElementById('email').value;
+        const type = document.getElementById('userType').value;
+        
+        if (!username || !email) return alert("Please enter username and email.");
+        
+        // Register/Login via API
+        fetch(`${API_URL}/users/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username, email: email, customer_type: type })
+        })
+        .then(res => res.json())
+        .then(data => {
+            // Assume the backend returns the generated user_id
+            currentUser = { id: data.user_id || Math.floor(Math.random() * 1000), username: username, type: type };
+            
+            if (type === 'seller') {
+                showScreen('seller-screen');
+            } else {
+                loadCatalogue();
+                showScreen('buyer-screen');
+            }
+        })
+        .catch(err => {
+            alert("Backend connection failed! Make sure FastAPI is running.");
+            console.error(err);
+        });
+    }
+
+    function logout() {
+        currentUser = { id: null, username: null, type: null };
+        document.getElementById('username').value = '';
+        showScreen('login-screen');
+    }
+
+    /* --- 2. SELLER LOGIC (HTTP POST) --- */
+    function createProduct() {
+        const name = document.getElementById('prod-name').value;
+        const price = document.getElementById('prod-price').value;
+        const time = document.getElementById('prod-time').value;
+
+        if (!name || !price) return alert("Fill in all fields.");
+
+        fetch(`${API_URL}/products/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                description: "Auction Item",
+                starting_price: parseFloat(price),
+                time_left: parseInt(time)
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Success! Auction for ${name} is now LIVE.`);
+            document.getElementById('prod-name').value = '';
+            document.getElementById('prod-price').value = '';
+        })
+        .catch(error => alert("Error connecting to server."));
+    }
+
+    /* --- 3. BUYER LOGIC (HTTP GET) --- */
+    function loadCatalogue() {
+        const listDiv = document.getElementById('catalogue-list');
+        listDiv.innerHTML = 'Connecting to server...'; 
+
+        fetch(`${API_URL}/rooms/`)
+            .then(response => response.json())
+            .then(data => {
+                listDiv.innerHTML = ''; 
+                
+                if (data.length === 0) {
+                    listDiv.innerHTML = '<p>No active auctions right now.</p>';
+                    return;
+                }
+
+                data.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'product-card';
+                    card.innerHTML = `
+                        <div>
+                            <strong>${item.name}</strong><br>
+                            <small style="color:var(--accent); font-weight:bold;">Current Bid: $${item.current_price}</small>
+                        </div>
+                        <button class="action" onclick="joinRoom(${item.room_id}, '${item.name}', ${item.current_price})" style="width: auto; padding: 8px 16px;">Join</button>
+                    `;
+                    listDiv.appendChild(card);
+                });
+            })
+            .catch(error => {
+                listDiv.innerHTML = `<p style="color:red;">Error fetching catalogue. Is the server running?</p>`;
+            });
+    }
+
+    /* --- 4. WEBSOCKET LOGIC (THE LIVE ROOM) --- */
+    function joinRoom(roomId, roomName, startPrice) {
+        showScreen('room-screen');
+        document.getElementById('room-title').innerText = roomName;
+        document.getElementById('current-price').innerText = startPrice;
+        document.getElementById('chat-log').innerHTML = ''; 
+        document.getElementById('countdown').innerText = "Live";
+        
+        logEvent(`SYSTEM: Dialing server for Room ${roomId}...`);
+
+        // Close any existing connection just in case
+        if (currentWs) { currentWs.close(); }
+
+        // REAL WEBSOCKET CONNECTION
+        currentWs = new WebSocket(`ws://localhost:8000/ws/auction/${roomId}/${currentUser.id}`);
+        
+        currentWs.onopen = function() {
+            logEvent(`SYSTEM: Handshake complete. You are in the room.`);
+        };
+
+        // THE EVENT LISTENER (Receiving broadcasts)
+        currentWs.onmessage = function(event) {
+            const server_msg = JSON.parse(event.data);
+            
+            if (server_msg.event === "new_highest_bid") {
+                document.getElementById('current-price').innerText = server_msg.amount;
+                
+                if(server_msg.user_id == currentUser.id) {
+                    logEvent(`✅ SUCCESS: Your bid of $${server_msg.amount} was accepted!`);
+                } else {
+                    logEvent(`⚠️ ALERT: User ${server_msg.user_id} outbid you at $${server_msg.amount}`);
+                }
+            } 
+            else if (server_msg.event === "bid_rejected") {
+                logEvent(`❌ REJECTED: ${server_msg.msg}`);
+            }
+            else if (server_msg.event === "auction_ended") {
+                logEvent(`🛑 SERVER: ${server_msg.msg}`);
+                document.getElementById('countdown').innerText = "SOLD!";
+                document.getElementById('bid-amount').disabled = true;
+            }
+            else if (server_msg.error) {
+                logEvent(`❌ ERROR: ${server_msg.error}`);
+            }
+        };
+
+        currentWs.onclose = function() {
+            logEvent(`SYSTEM: Connection to server closed.`);
+        };
+    }
+
+    function placeBid() {
+        const bidInput = document.getElementById('bid-amount');
+        const bid = bidInput.value;
+        
+        if (!bid || !currentWs) return;
+
+        logEvent(`... Sending bid of $${bid} to server ...`);
+
+        // PUSH DATA UP THE WEBSOCKET
+        currentWs.send(JSON.stringify({ amount: parseFloat(bid) }));
+        
+        bidInput.value = '';
+    }
+
+    function leaveRoom() {
+        if (currentWs) {
+            currentWs.close();
+            currentWs = null;
+        }
+        document.getElementById('bid-amount').disabled = false; // Re-enable for next room
+        loadCatalogue(); // Refresh the list
+        showScreen('buyer-screen');
+    }
+
+    function logEvent(msg) {
+        const log = document.getElementById('chat-log');
+        const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+        log.innerHTML += `<div class="log-entry"><strong>[${time}]</strong> ${msg}</div>`;
+        log.scrollTop = log.scrollHeight; // Auto-scroll to bottom
+    }
+</script>
+</body>
+</html>
