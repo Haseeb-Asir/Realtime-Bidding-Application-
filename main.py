@@ -63,3 +63,4 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# this html handles all the possible locks and updation in real time 
